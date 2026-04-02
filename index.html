@@ -1,0 +1,21 @@
+async function connectBT() {
+    try {
+        console.log('Запуск поиска...');
+        
+        // Edge попросит выбрать устройство
+        const device = await navigator.bluetooth.requestDevice({
+            // acceptAllDevices: true // Можно искать вообще всё
+            filters: [{ services: ['battery_service'] }] // Например, ищем устройства, которые умеют показывать заряд (самое простое для теста)
+        });
+
+        console.log('Подключено к: ' + device.name);
+        
+        // Подключаемся к серверу устройства
+        const server = await device.gatt.connect();
+        alert("Связь установлена с " + device.name + "!");
+        
+    } catch (error) {
+        console.log('Ошибка: ' + error);
+        alert("Edge не смог найти устройства. Проверь, включен ли Bluetooth в настройках Windows!");
+    }
+}
