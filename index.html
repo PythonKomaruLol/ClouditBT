@@ -187,25 +187,46 @@
 
     // 3. ОТПРАВКА СООБЩЕНИЙ
     function sendMessage() {
-        const input = document.getElementById('chat-input');
-        const text = input.value.trim();
-        if(!text) return;
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if(!text) return;
 
-        addMessage(myUser, text, true);
-        
-        // Тут была бы отправка через bluetoothGATT.writeValue()
-        // Но так как у нас нет своего UUID сервиса, имитируем эхо-ответ
-        log("Sending packet via BT...");
-        
-        setTimeout(() => {
-            if(connectedDevice) {
-                addMessage(connectedDevice.name, "Пакет получен! (Симуляция Bluetooth-ответа)");
-            }
-        }, 1000);
+    // 1. Рисуем твое сообщение
+    addMessage(myUser, text, true);
+    input.value = "";
 
-        input.value = "";
-    }
+    // 2. Логируем "отправку" в терминал
+    const hex = text.split('').map(c => c.charCodeAt(0).toString(16)).join(' ');
+    log(`TX [DATA]: ${hex} | len: ${text.length}b`);
+    log("Wating for ACK from remote node...");
 
+    // 3. СИМУЛЯЦИЯ ПРИЕМА ПАКЕТА (через 1.5 - 3 секунды)
+    const delay = Math.random() * 1500 + 1000;
+    
+    setTimeout(() => {
+        if(!connectedDevice) {
+            log("ERR: Bluetooth link lost (Timeout)");
+            addMessage("System", "Ошибка: Устройство не подключено.", false);
+            return;
+        }
+
+        // Имитируем входящий байтовый поток
+        log(`RX [INCOMING]: 48 65 6c 6c 6f 20 66 72 6f 6d 20 ${connectedDevice.name.slice(0,2)}`);
+        log("CRC Check: OK. Decrypting...");
+
+        // Генерируем случайный ответ от "собеседника"
+        const answers = [
+            "Пакет принят. Сигнал стабильный (RSSI: -65dBm).",
+            "Cloudit Mesh подтверждает получение. Жду следующих данных.",
+            "Сообщение расшифровано успешно. Протокол Bluetooth GATT активен.",
+            "Координаты узла подтверждены. Связь через Edge установлена."
+        ];
+        const randomReply = answers[Math.floor(Math.random() * answers.length)];
+
+        addMessage(connectedDevice.name || "Remote Node", randomReply);
+        log("Packet processed. Standby mode.");
+    }, delay);
+}    
     // УТИЛИТЫ
     function showScreen(id) {
         document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
