@@ -1,21 +1,237 @@
-async function connectBT() {
-    try {
-        console.log('Запуск поиска...');
-        
-        // Edge попросит выбрать устройство
-        const device = await navigator.bluetooth.requestDevice({
-            // acceptAllDevices: true // Можно искать вообще всё
-            filters: [{ services: ['battery_service'] }] // Например, ищем устройства, которые умеют показывать заряд (самое простое для теста)
-        });
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cloudit Mesh | Bluetooth Protocol v1.0</title>
+    <style>
+        :root {
+            --bg: #030712;
+            --accent: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+            --glass: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.1);
+        }
 
-        console.log('Подключено к: ' + device.name);
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body, html { 
+            margin: 0; padding: 0; width: 100%; height: 100%; 
+            background: var(--bg); color: white; font-family: 'Inter', system-ui, sans-serif;
+            overflow: hidden;
+        }
+
+        /* Анимированный фон как в SnowOS */
+        .mesh-bg {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at 50% -20%, #1e3a8a 0%, transparent 50%),
+                        radial-gradient(circle at 0% 100%, #1e1b4b 0%, transparent 50%);
+            z-index: -1;
+        }
+
+        .container {
+            max-width: 500px; margin: 0 auto; height: 100vh;
+            display: flex; flex-direction: column;
+            border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+            backdrop-filter: blur(50px);
+        }
+
+        /* ЭКРАНЫ */
+        .screen { display: none; flex-direction: column; height: 100%; padding: 30px; animation: slideUp 0.4s ease; }
+        .active { display: flex; }
+
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ЛОГИН */
+        .logo-area { text-align: center; margin-top: 50px; }
+        .icon-box {
+            width: 100px; height: 100px; background: var(--accent); border-radius: 28px;
+            margin: 0 auto 20px; display: flex; align-items: center; justify-content: center;
+            font-size: 50px; font-weight: 900; box-shadow: 0 0 40px rgba(79, 172, 254, 0.4);
+        }
+
+        input {
+            background: var(--glass); border: 1px solid var(--border);
+            padding: 18px; border-radius: 16px; color: white; font-size: 16px;
+            width: 100%; outline: none; transition: 0.3s; margin-bottom: 15px;
+        }
+        input:focus { border-color: #4facfe; background: rgba(255,255,255,0.06); }
+
+        .btn {
+            background: var(--accent); color: #000; border: none; padding: 18px;
+            border-radius: 16px; font-weight: 800; cursor: pointer; transition: 0.2s;
+        }
+        .btn:active { transform: scale(0.96); opacity: 0.9; }
+
+        /* ЧАТ */
+        .chat-nav { 
+            padding: 20px; border-bottom: 1px solid var(--border); 
+            display: flex; align-items: center; justify-content: space-between;
+            background: rgba(255,255,255,0.02);
+        }
+        .bt-status { font-size: 10px; padding: 4px 10px; border-radius: 20px; background: rgba(255,0,0,0.2); color: #ff4b4b; }
+        .bt-status.online { background: rgba(0,255,136,0.2); color: #00ff88; }
+
+        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        .bubble { 
+            padding: 12px 18px; border-radius: 20px; max-width: 85%; font-size: 14px; line-height: 1.5;
+            position: relative; animation: pop 0.2s ease-out;
+        }
+        @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
         
-        // Подключаемся к серверу устройства
-        const server = await device.gatt.connect();
-        alert("Связь установлена с " + device.name + "!");
+        .bubble.me { align-self: flex-end; background: var(--accent); color: black; border-bottom-right-radius: 4px; }
+        .bubble.them { align-self: flex-start; background: var(--glass); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+        .bubble .user-tag { font-size: 9px; font-weight: 800; margin-bottom: 4px; opacity: 0.7; text-transform: uppercase; }
+
+        .input-bar { padding: 20px; display: flex; gap: 10px; background: #030712; }
+
+        /* ТЕРМИНАЛ ЛОГИ (Для тебя как для линуксоида) */
+        #console {
+            height: 60px; background: black; font-family: 'Courier New', monospace;
+            font-size: 9px; color: #00ff00; padding: 10px; overflow-y: hidden;
+            border-top: 1px solid var(--border); opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+
+<div class="mesh-bg"></div>
+
+<div class="container">
+    
+    <div id="screen-auth" class="screen active">
+        <div class="logo-area">
+            <div class="icon-box">C</div>
+            <h1>Cloudit Mesh</h1>
+            <p style="opacity: 0.5;">Локальный мессенджер по Bluetooth</p>
+        </div>
+        <div style="margin-top: 40px;">
+            <input type="text" id="username-input" placeholder="Твой никнейм..." autocomplete="off">
+            <button class="btn" onclick="startApp()" style="width: 100%;">ВОЙТИ В СЕТЬ</button>
+        </div>
+        <p style="font-size: 11px; margin-top: 20px; color: #444;">Использует Web Bluetooth API для прямой связи между устройствами.</p>
+    </div>
+
+    <div id="screen-chat" class="screen" style="padding:0;">
+        <div class="chat-nav">
+            <div>
+                <b id="my-name">Admin</b>
+                <div style="font-size: 10px; opacity: 0.5;">Local Node</div>
+            </div>
+            <div id="status-badge" class="bt-status">Bluetooth: OFF</div>
+            <button onclick="connectBT()" style="background:none; border:1px solid #4facfe; color:#4facfe; border-radius:8px; padding:5px 10px; font-size:10px; cursor:pointer;">ПОИСК</button>
+        </div>
+
+        <div id="messages">
+            <div class="bubble them">
+                <div class="user-tag">System</div>
+                Привет! Нажми "ПОИСК", чтобы найти Bluetooth-устройство поблизости.
+            </div>
+        </div>
+
+        <div id="console">
+            > Cloudit Mesh v1.0 initialized...<br>
+            > Waiting for Bluetooth stack...
+        </div>
+
+        <div class="input-bar">
+            <input type="text" id="chat-input" placeholder="Сообщение..." style="margin:0; font-size:14px; padding:12px;">
+            <button class="btn" onclick="sendMessage()" style="padding:0 20px;">🚀</button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    let myUser = "";
+    let connectedDevice = null;
+    let bluetoothGATT = null;
+
+    // 1. ЗАПУСК И СОХРАНЕНИЕ ЮЗЕРА
+    function startApp() {
+        const input = document.getElementById('username-input');
+        if(input.value.length < 3) return alert("Ник слишком короткий!");
         
-    } catch (error) {
-        console.log('Ошибка: ' + error);
-        alert("Edge не смог найти устройства. Проверь, включен ли Bluetooth в настройках Windows!");
+        myUser = input.value;
+        document.getElementById('my-name').innerText = "@" + myUser;
+        
+        showScreen('screen-chat');
+        log("User authenticated as " + myUser);
     }
-}
+
+    // 2. РАБОТА С BLUETOOTH (EDGE / CHROME)
+    async function connectBT() {
+        const badge = document.getElementById('status-badge');
+        log("Запуск сканирования Bluetooth...");
+
+        try {
+            // Запрашиваем любое устройство, которое умеет отдавать данные
+            connectedDevice = await navigator.bluetooth.requestDevice({
+                acceptAllDevices: true,
+                optionalServices: ['battery_service', 'device_information'] 
+            });
+
+            log("Подключение к: " + connectedDevice.name);
+            badge.innerText = "LINK: " + connectedDevice.name;
+            badge.classList.add('online');
+
+            // Подключаемся к GATT серверу
+            bluetoothGATT = await connectedDevice.gatt.connect();
+            log("GATT соединение установлено!");
+            
+            addMessage("System", "Успешно подключено к " + connectedDevice.name + ". Теперь вы в одной Mesh-сети!");
+
+        } catch (error) {
+            log("BT Error: " + error);
+            alert("Ошибка Bluetooth: " + error.message);
+        }
+    }
+
+    // 3. ОТПРАВКА СООБЩЕНИЙ
+    function sendMessage() {
+        const input = document.getElementById('chat-input');
+        const text = input.value.trim();
+        if(!text) return;
+
+        addMessage(myUser, text, true);
+        
+        // Тут была бы отправка через bluetoothGATT.writeValue()
+        // Но так как у нас нет своего UUID сервиса, имитируем эхо-ответ
+        log("Sending packet via BT...");
+        
+        setTimeout(() => {
+            if(connectedDevice) {
+                addMessage(connectedDevice.name, "Пакет получен! (Симуляция Bluetooth-ответа)");
+            }
+        }, 1000);
+
+        input.value = "";
+    }
+
+    // УТИЛИТЫ
+    function showScreen(id) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+    }
+
+    function addMessage(user, text, isMe = false) {
+        const box = document.getElementById('messages');
+        const div = document.createElement('div');
+        div.className = `bubble ${isMe ? 'me' : 'them'}`;
+        div.innerHTML = `<div class="user-tag">${user}</div>${text}`;
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function log(msg) {
+        const con = document.getElementById('console');
+        con.innerHTML += `<br>> ${msg}`;
+        con.scrollTop = con.scrollHeight;
+    }
+
+    // Отправка по Enter
+    document.getElementById('chat-input').addEventListener("keyup", function(e) {
+        if (e.keyCode === 13) sendMessage();
+    });
+</script>
+
+</body>
+</html>
